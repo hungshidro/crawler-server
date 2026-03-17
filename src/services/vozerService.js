@@ -291,6 +291,9 @@ export const crawlChapterContent = async (url) => {
       url
     };
   } catch (error) {
+    if (error?.meessage?.includes('503') || error?.code === 503) {
+      sessionCookies = ''
+    }
     throw new Error(`Khong the crawl chapter: ${error.message}`);
   }
 };
