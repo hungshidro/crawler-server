@@ -10,13 +10,37 @@ npm install
 
 ## Cấu hình
 
-Copy cookies từ browser vào file `.env`:
+Copy `.env.example` thành `.env` và điền thông tin:
 
 ```env
+# Port
+PORT=3000
+
+# Redis (Optional - Highly Recommended for Production)
+# Setup guide: UPSTASH_SETUP.md
+REDIS_URL=redis://localhost:6379
+
+# Vozer credentials
 VOZER_EMAIL=your_email@gmail.com
 VOZER_PASSWORD=your_password
+
+# Hoặc dùng cookies trực tiếp (ưu tiên hơn)
 VOZER_COOKIES=laravel_session=...; XSRF-TOKEN=...
 ```
+
+### 🚀 Production Setup (Render + Upstash Redis)
+
+**Để có performance tốt nhất, setup Redis cache:**
+
+1. **Quick:** Xem [UPSTASH_SETUP.md](UPSTASH_SETUP.md) - Setup Redis miễn phí trong 5 phút
+2. **Detailed:** Xem [REDIS_SETUP.md](REDIS_SETUP.md) - Đầy đủ options và troubleshooting
+
+**Lợi ích:**
+- ✅ Restart server không mất cookies (không cần login lại)
+- ✅ Cache chapters → response nhanh gấp 50-100x
+- ✅ Giảm 80% load lên vozer.io
+
+**Server vẫn chạy bình thường nếu không có Redis**, chỉ không có cache.
 
 ## Chạy server
 

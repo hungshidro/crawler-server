@@ -3,6 +3,7 @@ import * as cheerio from "cheerio";
 import dotenv from "dotenv";
 import https from "https";
 import puppeteer from "puppeteer";
+import { cacheGet, cacheSet, cacheDel } from "../config/redis.js";
 
 dotenv.config();
 
@@ -20,6 +21,42 @@ const client = axios.create({
 let isLoggedIn = false;
 let sessionCookies = process.env.VOZER_COOKIES || "";
 let loginPromise = null; // Track ongoing login process
+
+// Load cookies from Redis on startup
+const loadCookiesFromCache = async () => {
+  try {
+    const cachedCookies = await cacheGet("vozer:session:cookies");
+    if (cachedCookies) {
+      sessionCookies = cachedCookies;
+      isLoggedIn = true;
+      console.log("✅ Loaded cookies from Redis cache");
+      return true;
+    }
+  } catch (error) {
+    console.error("Failed to load cookies from cache:", error.message);
+  }
+  return false;
+};
+
+// Save cookies to Redis
+const saveCookiesToCache = async (cookies, ttl = 86400) => {
+  try {
+    await cacheSet("vozer:session:cookies", cookies, ttl); // 24h default
+    console.log("✅ Saved cookies to Redis cache");
+  } catch (error) {
+    console.error("Failed to save cookies to cache:", error.message);
+  }
+};
+
+// Clear cookies from Redis
+const clearCookiesCache = async () => {
+  try {
+    await cacheDel("vozer:session:cookies");
+    console.log("🗑️  Cleared cookies cache");
+  } catch (error) {
+    console.error("Failed to clear cookies cache:", error.message);
+  }
+};
 
 const is503Error = (error) => {
   return (
@@ -159,6 +196,10 @@ const performLogin = async (email, password) => {
     await browser.close();
 
     isLoggedIn = true;
+    
+    // Save cookies to Redis cache
+    await saveCookiesToCache(sessionCookies);
+    
     return {
       success: true,
       message: "Dang nhap thanh cong bang Puppeteer",
@@ -202,11 +243,29 @@ const getHeaders = (url, referer = "https://vozer.io/") => {
 
 // Crawl noi dung mot chapter
 export const crawlChapterContent = async (url, retryCount = 0) => {
+  // Check cache first (skip cache on retry)
+  if (retryCount === 0) {
+    try {
+      const cacheKey = `chapter:${url}`;
+      const cached = await cacheGet(cacheKey);
+      if (cached) {
+        console.log("✅ Cache hit for:", url);
+        return JSON.parse(cached);
+      }
+    } catch (error) {
+      console.log("Cache check failed, proceeding to crawl:", error.message);
+    }
+  }
+
   try {
     // Tu dong login neu chua login va co credentials
     if (!isLoggedIn && !sessionCookies) {
       console.log("Auto-login before crawling...");
-      await login();
+      // Try load from cache first
+      const loaded = await loadCookiesFromCache();
+      if (!loaded) {
+        await login();
+      }
     }
 
     console.log("Crawling URL:", url);
@@ -343,7 +402,7 @@ export const crawlChapterContent = async (url, retryCount = 0) => {
       .first()
       .attr("href");
 
-    return {
+    const result = {
       novelTitle,
       chapterTitle,
       chapterNumber,
@@ -354,15 +413,27 @@ export const crawlChapterContent = async (url, retryCount = 0) => {
       },
       url,
     };
+
+    // Cache the result (1 hour TTL)
+    try {
+      const cacheKey = `chapter:${url}`;
+      await cacheSet(cacheKey, JSON.stringify(result), 3600);
+      console.log("✅ Cached chapter:", url);
+    } catch (error) {
+      console.log("Failed to cache chapter:", error.message);
+    }
+
+    return result;
   } catch (error) {
     // Neu gap loi 503 va chua retry, thu login lai va retry
     if (is503Error(error) && retryCount === 0) {
       console.log("Loi 503 - Cookie het han, dang login lai...");
       console.log("Concurrent requests se doi login process hoan thanh...");
       
-      // Reset session state
+      // Reset session state and clear cache
       isLoggedIn = false;
       sessionCookies = "";
+      await clearCookiesCache();
       
       // Login lai (neu co login process khac dang chay, se tu dong doi)
       const loginResult = await login();
@@ -382,6 +453,7 @@ export const crawlChapterContent = async (url, retryCount = 0) => {
     if (is503Error(error)) {
       isLoggedIn = false;
       sessionCookies = "";
+      await clearCookiesCache();
     }
     throw new Error(`Khong the crawl chapter: ${error.message}`);
   }
