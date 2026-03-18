@@ -21,11 +21,13 @@ app.use(express.urlencoded({ extended: true }));
 app.get('/', (req, res) => {
   res.json({
     message: 'Crawler Server API',
-    version: '1.0.0',
+    version: '1.1.0',
     endpoints: {
       crawlChapter: 'POST /api/crawler/chapter',
       crawlNovel: 'POST /api/crawler/novel',
-      getChapterList: 'POST /api/crawler/chapters'
+      getChapterList: 'POST /api/crawler/chapters',
+      crawlBatch: 'POST /api/crawler/chapters/batch',
+      login: 'POST /api/crawler/login'
     }
   });
 });

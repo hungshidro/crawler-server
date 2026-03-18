@@ -1,4 +1,4 @@
-import { crawlChapterContent, crawlNovelInfo, crawlChapters, login } from '../services/vozerService.js';
+import { crawlChapterContent, crawlNovelInfo, crawlChapters, login, crawlMultipleChapters } from '../services/vozerService.js';
 
 // Factory function de chon service dua tren type
 const getServiceByType = (type) => {
@@ -9,6 +9,7 @@ const getServiceByType = (type) => {
         crawlChapter: crawlChapterContent,
         crawlNovel: crawlNovelInfo,
         crawlChapters: crawlChapters,
+        crawlMultipleChapters: crawlMultipleChapters,
         login: login
       };
     // Co the them cac service khac o day
@@ -119,6 +120,60 @@ export const crawlChapterList = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Lỗi khi crawl danh sách chapters',
+      error: error.message
+    });
+  }
+};
+
+export const crawlBatch = async (req, res) => {
+  try {
+    const { startUrl, endChapter, maxChapters, type = 'vozer' } = req.body;
+    
+    if (!startUrl) {
+      return res.status(400).json({
+        success: false,
+        message: 'startUrl la bat buoc'
+      });
+    }
+
+    const service = getServiceByType(type);
+    
+    // Set up SSE for progress updates if client accepts it
+    const acceptsSSE = req.headers.accept?.includes('text/event-stream');
+    
+    if (acceptsSSE) {
+      // Server-Sent Events for real-time progress
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.flushHeaders();
+
+      const onProgress = (progress) => {
+        res.write(`data: ${JSON.stringify(progress)}\n\n`);
+      };
+
+      const result = await service.crawlMultipleChapters(startUrl, {
+        endChapter,
+        maxChapters: maxChapters || 100,
+        onProgress
+      });
+
+      res.write(`data: ${JSON.stringify({ type: 'complete', result })}\n\n`);
+      res.end();
+    } else {
+      // Regular JSON response
+      const result = await service.crawlMultipleChapters(startUrl, {
+        endChapter,
+        maxChapters: maxChapters || 100
+      });
+      
+      res.json(result);
+    }
+  } catch (error) {
+    console.error('Error in batch crawl:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Loi khi crawl nhieu chapters',
       error: error.message
     });
   }

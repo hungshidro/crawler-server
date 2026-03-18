@@ -77,7 +77,7 @@ export const login = async (email, password) => {
 
   // Tao promise va luu lai de cac request khac co the doi
   loginPromise = performLogin(email, password);
-  
+
   try {
     const result = await loginPromise;
     return result;
@@ -196,10 +196,10 @@ const performLogin = async (email, password) => {
     await browser.close();
 
     isLoggedIn = true;
-    
+
     // Save cookies to Redis cache
     await saveCookiesToCache(sessionCookies);
-    
+
     return {
       success: true,
       message: "Dang nhap thanh cong bang Puppeteer",
@@ -429,15 +429,15 @@ export const crawlChapterContent = async (url, retryCount = 0) => {
     if (is503Error(error) && retryCount === 0) {
       console.log("Loi 503 - Cookie het han, dang login lai...");
       console.log("Concurrent requests se doi login process hoan thanh...");
-      
+
       // Reset session state and clear cache
       isLoggedIn = false;
       sessionCookies = "";
       await clearCookiesCache();
-      
+
       // Login lai (neu co login process khac dang chay, se tu dong doi)
       const loginResult = await login();
-      
+
       if (loginResult.success) {
         console.log("Login thanh cong, retry crawl chapter...");
         // Doi them 500ms de dam bao cookies da duoc cap nhat
@@ -448,7 +448,7 @@ export const crawlChapterContent = async (url, retryCount = 0) => {
         throw new Error(`Khong the login lai: ${loginResult.message}`);
       }
     }
-    
+
     // Neu khong phai 503 hoac da retry roi, throw error
     if (is503Error(error)) {
       isLoggedIn = false;
@@ -610,5 +610,148 @@ export const crawlChapters = async (url) => {
     };
   } catch (error) {
     throw new Error(`Khong the crawl danh sach chapters: ${error.message}`);
+  }
+};
+
+// Crawl nhieu chapters lien tiep tu dong
+export const crawlMultipleChapters = async (startUrl, options = {}) => {
+  const {
+    endChapter = null, // So chuong ket thuc (optional)
+    maxChapters = 100, // Gioi han so chapters de tranh timeout (default: 100)
+    onProgress = null, // Callback function de bao cao tien do
+  } = options;
+
+  let successCount = 0;
+  let failedCount = 0;
+  let currentUrl = startUrl;
+  let chapterCount = 0;
+  let lastNextUrl = null; // Track next URL for error handling
+
+  try {
+    // Load cookies from cache if needed
+    if (!isLoggedIn && !sessionCookies) {
+      console.log("Auto-login before batch crawling...");
+      const loaded = await loadCookiesFromCache();
+      if (!loaded) {
+        await login();
+      }
+    }
+
+    console.log(`Start crawling from: ${startUrl}`);
+    if (endChapter) {
+      console.log(`Will stop at chapter: ${endChapter}`);
+    }
+    console.log(`Max chapters limit: ${maxChapters}`);
+
+    while (currentUrl && chapterCount < maxChapters) {
+      try {
+        console.log(`Crawling chapter ${chapterCount + 1}: ${currentUrl}`);
+
+        // Crawl chapter hien tai
+        const chapterData = await crawlChapterContent(currentUrl);
+
+        // Extract chapter number from URL or title
+        const chapterNumber =
+          currentUrl.match(/chuong-(\d+)/)?.[1] ||
+          chapterData.chapterNumber ||
+          (chapterCount + 1).toString();
+
+        // Increment success count
+        successCount++;
+        chapterCount++;
+
+        // Call progress callback if provided
+        if (onProgress) {
+          onProgress({
+            current: chapterCount,
+            chapterNumber,
+            title: chapterData.chapterTitle,
+            url: currentUrl,
+          });
+        }
+
+        console.log(
+          `✅ Crawled chapter ${chapterNumber}: ${chapterData.chapterTitle}`,
+        );
+
+        // Kiem tra xem da den chapter ket thuc chua
+        if (endChapter && parseInt(chapterNumber) >= parseInt(endChapter)) {
+          console.log(`Reached end chapter: ${endChapter}`);
+          break;
+        }
+
+        // Lay URL chapter tiep theo
+        const nextUrl = chapterData.navigation?.next;
+        lastNextUrl = nextUrl; // Luu lai de dung trong error handling
+
+        if (!nextUrl) {
+          console.log("No more chapters (reached the end)");
+          break;
+        }
+
+        // Update currentUrl cho lan lap tiep theo
+        currentUrl = nextUrl;
+
+        // Doi 1-2 giay giua cac requests de tranh bi ban
+        const delay = Math.floor(Math.random() * 1000) + 1000; // 1-2s random
+        console.log(`Waiting ${delay}ms before next chapter...`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      } catch (error) {
+        console.error(`Error crawling ${currentUrl}:`, error.message);
+
+        // Increment failed count
+        failedCount++;
+
+        // Neu loi qua nhieu, dung lai
+        if (failedCount >= 3) {
+          console.error("Too many errors, stopping batch crawl");
+          break;
+        }
+
+        // Neu gap 503, thu login lai
+        if (is503Error(error)) {
+          console.log("Got 503 error, attempting to re-login...");
+          isLoggedIn = false;
+          sessionCookies = "";
+          await clearCookiesCache();
+          await login();
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+          // Retry chapter nay
+          failedCount--; // Giam count vi se retry
+          continue;
+        }
+
+        console.log(`Crawl chapter failed, stop at URL: ${currentUrl}`);
+        // Khong co cach nao tiep tuc, dung lai
+        break;
+      }
+    }
+
+    // Summary
+    const summary = {
+      success: true,
+      totalSuccess: successCount,
+      totalFailed: failedCount,
+      message: `Crawled ${successCount} chapters successfully`,
+    };
+
+    if (chapterCount >= maxChapters) {
+      summary.message += ` (reached max limit: ${maxChapters})`;
+      summary.limitReached = true;
+    }
+
+    if (failedCount > 0) {
+      summary.message += `, ${failedCount} chapters failed`;
+    }
+
+    return summary;
+  } catch (error) {
+    return {
+      success: false,
+      totalSuccess: successCount,
+      totalFailed: failedCount,
+      message: `Batch crawl stopped: ${error.message}`,
+      error: error.message,
+    };
   }
 };

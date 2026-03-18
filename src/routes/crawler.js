@@ -1,5 +1,5 @@
 import express from 'express';
-import { crawlChapter, crawlNovel, crawlChapterList, userLogin } from '../controllers/crawlerController.js';
+import { crawlChapter, crawlNovel, crawlChapterList, userLogin, crawlBatch } from '../controllers/crawlerController.js';
 
 const router = express.Router();
 
@@ -14,5 +14,8 @@ router.post('/novel', crawlNovel);
 
 // Crawl danh sách chapters
 router.post('/chapters', crawlChapterList);
+
+// Crawl nhiều chapters tự động (batch)
+router.post('/chapters/batch', crawlBatch);
 
 export default router;
